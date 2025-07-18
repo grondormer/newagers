@@ -1,11 +1,16 @@
 import base58
 import json
+import os
 import time
 import multiprocessing
 from multiprocessing import Pool, cpu_count
 from solders.keypair import Keypair
 from github import Github, Auth
 import signal
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Disable SSL warnings for GitHub API
 import urllib3
@@ -24,8 +29,8 @@ signal.signal(signal.SIGINT, signal_handler)
 
 # Configuration
 TARGET_SUFFIX = "bonk"
-GITHUB_TOKEN = "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"  # GitHub token for repository access
-REPO_NAME = "grondormer/vanbonkwal"  # Your repository
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+REPO_NAME = os.getenv('REPO_NAME', 'bonk-wallets')
 FILE_NAME = "wallets.json"  # File to store wallets in the repo
 
 class WalletGenerator:
@@ -231,8 +236,9 @@ class WalletGenerator:
             print(f"Elapsed time: {elapsed:.1f} seconds")
 
 if __name__ == "__main__":
-    if not GITHUB_TOKEN or GITHUB_TOKEN == "your_github_token_here":
-        print("⚠️ Please set your GitHub token in the script first!")
+    if not GITHUB_TOKEN:
+        print("⚠️ Please set your GITHUB_TOKEN in the .env file!")
+        print("Create a .env file based on .env.example and add your GitHub token")
         exit(1)
         
     generator = WalletGenerator()
