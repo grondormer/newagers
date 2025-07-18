@@ -312,12 +312,22 @@ generator = WalletGenerator()
 
 @app.route('/')
 def index():
-    """Serve a simple page showing found wallets."""
+    """Serve a simple page showing wallet generation stats."""
     with found_wallets_lock:
-        # Create a simple text response with found wallets
-        response = "Found Wallets:\n\n"
-        for wallet in found_wallets:
-            response += f"🔑 {wallet['public_key']}\n"
+        # Get the current stats
+        global wallet_counter
+        with counter_lock:
+            total_generated = wallet_counter
+        total_matched = len(found_wallets)
+        
+        # Create a simple text response with stats
+        response = (
+            f"Bonk Vanity Wallet Generator\n"
+            f"===========================\n\n"
+            f"Total Wallets Generated: {total_generated:,}\n"
+            f"Matching Wallets Found: {total_matched:,}\n"
+            f"\nLast updated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
         
         return Response(response, mimetype='text/plain')
 
