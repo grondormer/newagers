@@ -9,7 +9,7 @@ from solders.keypair import Keypair
 from github import Github, Auth
 import signal
 from dotenv import load_dotenv
-from flask import Flask, Response
+from flask import Flask, Response, request, jsonify
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,6 +21,7 @@ urllib3.disable_warnings()
 # Global flag for clean shutdown
 shutdown_flag = False
 app = Flask(__name__)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching for development
 
 # Store found wallets
 found_wallets = []
@@ -29,6 +30,11 @@ found_wallets_lock = threading.Lock()
 # Global counter for wallet generation
 wallet_counter = 0
 counter_lock = threading.Lock()
+
+# Keep-alive status
+keep_alive_active = False
+keep_alive_thread = None
+keep_alive_stop = threading.Event()
 
 def signal_handler(sig, frame):
     global shutdown_flag
@@ -331,25 +337,175 @@ class WalletGenerator:
 generator = WalletGenerator()
 
 @app.route('/')
+def keep_alive_worker():
+    """Background thread function to ping the site."""
+    global keep_alive_active
+    import requests
+    from datetime import datetime
+    
+    while not keep_alive_stop.is_set():
+        try:
+            site_url = os.getenv('RENDER_SITE_URL', 'http://localhost:5000')
+            start_time = time.time()
+            response = requests.get(site_url, timeout=10)
+            response_time = (time.time() - start_time) * 1000  # in milliseconds
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Pinged {site_url} - Status: {response.status_code} ({response_time:.2f}ms)")
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error pinging site: {str(e)}")
+        
+        # Wait for 1 minute or until stop is requested
+        keep_alive_stop.wait(60)
+    
+    keep_alive_active = False
+    print("Keep-alive worker stopped")
+
+def start_keep_alive():
+    """Start the keep-alive background thread."""
+    global keep_alive_active, keep_alive_thread, keep_alive_stop
+    
+    if not keep_alive_active:
+        keep_alive_stop.clear()
+        keep_alive_thread = threading.Thread(target=keep_alive_worker, daemon=True)
+        keep_alive_thread.start()
+        keep_alive_active = True
+        return True
+    return False
+
+def stop_keep_alive():
+    """Stop the keep-alive background thread."""
+    global keep_alive_active, keep_alive_thread, keep_alive_stop
+    
+    if keep_alive_active:
+        keep_alive_stop.set()
+        keep_alive_thread = None
+        keep_alive_active = False
+        return True
+    return False
+
+@app.route('/')
 def index():
-    """Serve a simple page showing wallet generation stats."""
+    """Serve the main page with wallet generation stats and keep-alive controls."""
     with found_wallets_lock:
         # Get the current stats
-        global wallet_counter
+        global wallet_counter, keep_alive_active
         with counter_lock:
             total_generated = wallet_counter
         total_matched = len(found_wallets)
         
-        # Create a simple text response with stats
-        response = (
-            f"Bonk Vanity Wallet Generator\n"
-            f"===========================\n\n"
-            f"Total Wallets Generated: {total_generated:,}\n"
-            f"Matching Wallets Found: {total_matched:,}\n"
-            f"\nLast updated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        # Generate HTML response
+        html = f"""<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Bonk Vanity Wallet Generator</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
+                .stats {{ background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                .control-panel {{ background: #e9f7fe; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                button {{ 
+                    background: #4CAF50; 
+                    color: white; 
+                    border: none; 
+                    padding: 10px 20px; 
+                    text-align: center; 
+                    text-decoration: none; 
+                    display: inline-block; 
+                    font-size: 16px; 
+                    margin: 4px 2px; 
+                    cursor: pointer; 
+                    border-radius: 4px;
+                }}
+                button:disabled {{ background: #cccccc; cursor: not-allowed; }}
+                #status {{ font-weight: bold; }}
+                .active {{ color: #4CAF50; }}
+                .inactive {{ color: #f44336; }}
+            </style>
+        </head>
+        <body>
+            <h1>Bonk Vanity Wallet Generator</h1>
+            
+            <div class="stats">
+                <h2>Wallet Generation Stats</h2>
+                <p>Total Wallets Generated: {total_generated:,}</p>
+                <p>Matching Wallets Found: {total_matched:,}</p>
+                <p>Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+            </div>
+            
+            <div class="control-panel">
+                <h2>Keep-Alive Control</h2>
+                <p>Status: <span id="status" class="{status_class}">{status_text}</span></p>
+                <button id="toggleButton" onclick="toggleKeepAlive()">{button_text}</button>
+                <p><small>This will ping the site every minute to keep it active.</small></p>
+            </div>
+            
+            <script>
+                function toggleKeepAlive() {{
+                    const button = document.getElementById('toggleButton');
+                    const status = document.getElementById('status');
+                    
+                    button.disabled = true;
+                    
+                    fetch(button.textContent.trim() === 'Start Keep-Alive' ? '/start-keepalive' : '/stop-keepalive')
+                        .then(response => response.json())
+                        .then(data => {{
+                            if (data.success) {{
+                                if (data.running) {{
+                                    button.textContent = 'Stop Keep-Alive';
+                                    status.textContent = 'Active';
+                                    status.className = 'active';
+                                }} else {{
+                                    button.textContent = 'Start Keep-Alive';
+                                    status.textContent = 'Inactive';
+                                    status.className = 'inactive';
+                                }}
+                            }} else {{
+                                alert('Error: ' + data.message);
+                            }}
+                            button.disabled = false;
+                        }})
+                        .catch(error => {{
+                            console.error('Error:', error);
+                            alert('An error occurred. Please check the console for details.');
+                            button.disabled = false;
+                        }});
+                }}
+                
+                // Update the button state on page load
+                document.addEventListener('DOMContentLoaded', function() {{
+                    const button = document.getElementById('toggleButton');
+                    button.disabled = false;
+                }});
+            </script>
+        </body>
+        </html>
+        """.format(
+            total_generated=total_generated,
+            total_matched=total_matched,
+            status_text='Active' if keep_alive_active else 'Inactive',
+            status_class='active' if keep_alive_active else 'inactive',
+            button_text='Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'
         )
         
-        return Response(response, mimetype='text/plain')
+        return Response(html, mimetype='text/html')
+
+@app.route('/start-keepalive', methods=['POST'])
+def start_keepalive():
+    """API endpoint to start the keep-alive process."""
+    success = start_keep_alive()
+    return jsonify({
+        'success': success,
+        'running': keep_alive_active,
+        'message': 'Keep-alive started successfully' if success else 'Keep-alive is already running'
+    })
+
+@app.route('/stop-keepalive', methods=['POST'])
+def stop_keepalive():
+    """API endpoint to stop the keep-alive process."""
+    success = stop_keep_alive()
+    return jsonify({
+        'success': success,
+        'running': keep_alive_active,
+        'message': 'Keep-alive stopped successfully' if success else 'Keep-alive is not running'
+    })
 
 # Start wallet generation in a background thread
 def start_wallet_generation():
@@ -366,9 +522,21 @@ if __name__ == "__main__":
     wallet_thread.start()
     
     # Register signal handler for clean shutdown
+    def signal_handler(sig, frame):
+        global shutdown_flag, keep_alive_active, keep_alive_thread
+        print("\n👋 Shutting down gracefully...")
+        shutdown_flag = True
+        stop_keep_alive()
+        if keep_alive_thread:
+            keep_alive_thread.join(timeout=5)
+        wallet_thread.join(timeout=5)
+        print("Cleanup complete. Goodbye!")
+        os._exit(0)
+    
     signal.signal(signal.SIGINT, signal_handler)
     
     # Start the Flask app
     port = int(os.getenv('PORT', 5000))
     print(f"[Web] Server running on http://localhost:{port}")
+    print("[Web] Access the web interface to control the keep-alive functionality")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
