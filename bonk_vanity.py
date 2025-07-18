@@ -336,7 +336,11 @@ class WalletGenerator:
 # Initialize the wallet generator and start generation in a background thread
 generator = WalletGenerator()
 
-@app.route('/')
+# Keep-alive control variables
+keep_alive_active = False
+keep_alive_thread = None
+keep_alive_stop = threading.Event()
+
 def keep_alive_worker():
     """Background thread function to ping the site."""
     global keep_alive_active
@@ -345,11 +349,30 @@ def keep_alive_worker():
     
     while not keep_alive_stop.is_set():
         try:
-            site_url = os.getenv('RENDER_SITE_URL', 'http://localhost:5000')
+            # Default to the Render site if not specified
+            site_url = os.getenv('RENDER_SITE_URL', 'https://newagers.onrender.com')
+            
+            # Ensure proper URL format
+            if not site_url.startswith(('http://', 'https://')):
+                site_url = f'https://{site_url}'
+            site_url = site_url.rstrip('/')
+            
+            # Make the request with a user agent and timeout
+            headers = {'User-Agent': 'BonkVanityKeepAlive/1.0'}
             start_time = time.time()
-            response = requests.get(site_url, timeout=10)
+            response = requests.get(
+                site_url, 
+                timeout=10, 
+                headers=headers,
+                verify=True  # Verify SSL certificate
+            )
             response_time = (time.time() - start_time) * 1000  # in milliseconds
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Pinged {site_url} - Status: {response.status_code} ({response_time:.2f}ms)")
+        except requests.exceptions.SSLError as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SSL Error: {str(e)}")
+            # Wait a bit longer on SSL errors to avoid hammering
+            keep_alive_stop.wait(300)  # 5 minutes
+            continue
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error pinging site: {str(e)}")
         
@@ -535,6 +558,107 @@ if __name__ == "__main__":
     
     signal.signal(signal.SIGINT, signal_handler)
     
+    # Add keep-alive control button to the existing page
+    @app.route('/')
+    def index():
+        with found_wallets_lock:
+            # Get the current stats
+            global wallet_counter, keep_alive_active
+            with counter_lock:
+                total_generated = wallet_counter
+            total_matched = len(found_wallets)
+            
+            # Get the original HTML response
+            original_html = """<!DOCTYPE html>
+            <html>
+            <head>
+                <title>Bonk Vanity Wallet Generator</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                    .stats { background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                    .control-panel { background: #e9f7fe; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                    button { 
+                        background: #4CAF50; 
+                        color: white; 
+                        border: none; 
+                        padding: 10px 20px; 
+                        text-align: center; 
+                        text-decoration: none; 
+                        display: inline-block; 
+                        font-size: 16px; 
+                        margin: 4px 2px; 
+                        cursor: pointer; 
+                        border-radius: 4px;
+                    }
+                    button:disabled { background: #cccccc; cursor: not-allowed; }
+                    #status { font-weight: bold; }
+                    .active { color: #4CAF50; }
+                    .inactive { color: #f44336; }
+                    .keep-alive-btn {
+                        position: fixed;
+                        bottom: 20px;
+                        right: 20px;
+                        z-index: 1000;
+                        background: #4CAF50;
+                        color: white;
+                        border: none;
+                        padding: 10px 20px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                    }
+                    .keep-alive-btn:disabled {
+                        background: #cccccc;
+                        cursor: not-allowed;
+                    }
+                    .keep-alive-btn.active {
+                        background: #f44336;
+                    }
+                </style>
+            </head>
+            <body>
+                <h1>Bonk Vanity Wallet Generator</h1>
+                
+                <div class="stats">
+                    <h2>Wallet Generation Stats</h2>
+                    <p>Total Wallets Generated: {total_generated:,}</p>
+                    <p>Matching Wallets Found: {total_matched:,}</p>
+                    <p>Last updated: {current_time}</p>
+                </div>
+                
+                <button id="keepAliveBtn" class="keep-alive-btn{' active' if keep_alive_active else ''}" 
+                        onclick="toggleKeepAlive()">
+                    {'Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'}
+                </button>
+                
+                <script>
+                    function toggleKeepAlive() {{
+                        const btn = document.getElementById('keepAliveBtn');
+                        btn.disabled = true;
+                        
+                        fetch(btn.textContent.trim() === 'Start Keep-Alive' ? '/start-keepalive' : '/stop-keepalive')
+                            .then(response => response.json())
+                            .then(data => {{
+                                if (data.success) {{
+                                    btn.textContent = data.active ? 'Stop Keep-Alive' : 'Start Keep-Alive';
+                                    if (data.active) {{
+                                        btn.classList.add('active');
+                                    }} else {{
+                                        btn.classList.remove('active');
+                                    }}
+                                }}
+                                btn.disabled = false;
+                            }});
+                    }}
+                </script>
+            </body>
+            </html>""".format(
+                total_generated=total_generated,
+                total_matched=total_matched,
+                current_time=time.strftime('%Y-%m-%d %H:%M:%S')
+            )
+            
+            return Response(original_html, mimetype='text/html')
+
     # Start the Flask app
     port = int(os.getenv('PORT', 5000))
     print(f"[Web] Server running on http://localhost:{port}")

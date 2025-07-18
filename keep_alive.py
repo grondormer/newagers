@@ -14,12 +14,14 @@ def ping_site(url):
         return str(e), 0
 
 def main():
-    # Get the site URL from environment variable or use localhost as default
-    site_url = os.getenv('RENDER_SITE_URL', 'http://localhost:10000')
+    # Get the site URL from environment variable or use the Render site as default
+    site_url = os.getenv('RENDER_SITE_URL', 'https://newagers.onrender.com')
     
-    # Add http:// if not present
+    # Add https:// if no scheme is present
     if not site_url.startswith(('http://', 'https://')):
-        site_url = f'http://{site_url}'
+        site_url = f'https://{site_url}'
+    # Ensure no trailing slash
+    site_url = site_url.rstrip('/')
     
     print(f"Starting keep-alive service for {site_url}")
     print("Press Ctrl+C to stop\n")
