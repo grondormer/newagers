@@ -1,0 +1,6 @@
+solders>=0.18.0
+solana>=0.30.0
+base58>=2.1.1
+python-dotenv>=1.0.0
+PyGithub>=2.0.0
+tqdm>=4.65.0
