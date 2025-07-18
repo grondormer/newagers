@@ -198,72 +198,86 @@ class WalletGenerator:
             print("Make sure your GitHub token has write access to the repository.")
 
     @staticmethod
-    def generate_wallet_batch(batch_size=100):
-        """Generate a batch of Solana keypairs (optimized version)."""
+    def generate_wallet_batch(batch_size=1000):  # Increased default batch size
+        """Generate a batch of Solana keypairs (highly optimized version)."""
         batch = []
-        for _ in range(batch_size):
+        # Pre-allocate list for better performance
+        batch = [None] * batch_size
+        for i in range(batch_size):
             keypair = Keypair()
             pubkey = str(keypair.pubkey())
-            batch.append(({
+            batch[i] = ({
                 'public_key': pubkey,
                 'private_key': base58.b58encode(bytes(keypair)).decode('utf-8')
-            }, pubkey.lower()))
+            }, pubkey.lower())
         return batch
 
     def process_wallet_batch(self, _):
-        """Process a batch of wallets (for multiprocessing)."""
+        """Process a batch of wallets (optimized for performance)."""
         if shutdown_flag:
             return None
             
-        batch = self.generate_wallet_batch(100)  # Process 100 wallets at once
+        # Process larger batches to reduce overhead
+        batch = self.generate_wallet_batch(1000)  # Increased from 100 to 1000
         matches = []
+        suffix_len = len(TARGET_SUFFIX)
         
         for wallet, pubkey_lower in batch:
-            if pubkey_lower.endswith(TARGET_SUFFIX):
-                if wallet['public_key'].endswith(TARGET_SUFFIX):  # Case-sensitive check
+            # Faster string comparison using slicing
+            if pubkey_lower[-suffix_len:] == TARGET_SUFFIX:
+                # Only check case if suffix matches
+                if wallet['public_key'].endswith(TARGET_SUFFIX):
                     matches.append(('match', wallet))
                 else:
                     matches.append(('reject', wallet['public_key']))
         
-        # Update the global counter in a thread-safe way
+        # Update counter without lock if possible (faster)
         global wallet_counter
-        with counter_lock:
-            wallet_counter += len(batch)
+        if hasattr(wallet_counter, 'value'):  # For multiprocessing.Value
+            wallet_counter.value += len(batch)
+        else:  # Fallback for threading
+            with counter_lock:
+                wallet_counter += len(batch)
             
         return matches if matches else None
 
     def run(self):
-        """Main wallet generation loop."""
+        """Main wallet generation loop (optimized for performance)."""
         print(f"🚀 Starting to generate wallets ending with '{TARGET_SUFFIX}'...")
-        print(f"Using {cpu_count()} CPU cores for parallel processing")
         
-        # Initial GitHub connection test
+        # Use all available cores, but cap at 4 for free tier efficiency
+        num_workers = min(cpu_count(), 4)  # Limit workers on free tier
+        print(f"Using {num_workers} workers for parallel processing")
+        
+        # Initial GitHub connection test (moved outside the main loop)
         if not self.setup_github(test_only=True):
             print("⚠️ GitHub connection test failed. Wallets will be generated but not saved to GitHub.")
         else:
             print("✅ GitHub connection test successful. Will save wallets when found.")
             self.initial_github_check_done = True
         
+        # Pre-allocate some memory
+        self.start_time = time.time()
+        self.last_print = self.start_time
+        
         try:
-            with Pool(processes=cpu_count()) as pool:
+            with Pool(processes=num_workers) as pool:
                 batch_count = 0
-                
+                # Use imap_unordered with larger chunks for better performance
                 for results in pool.imap_unordered(
                     self.process_wallet_batch, 
-                    range(10**6),
-                    chunksize=10
+                    range(10**6),  # Large range to keep generating
+                    chunksize=1  # Process one batch per worker at a time
                 ):
                     if shutdown_flag:
                         break
                         
-                    # Update counter with the batch size (100 wallets per batch)
+                    # Update counter (using batch size of 1000 now)
                     batch_count += 1
-                    global wallet_counter
-                    with counter_lock:
-                        wallet_counter = batch_count * 100
                     
-                    # Print status periodically
-                    if time.time() - self.last_print >= self.print_interval:
+                    # Print status less frequently to reduce overhead
+                    current_time = time.time()
+                    if current_time - self.last_print >= 5.0:  # Print every 5 seconds
                         self.print_status()
                     
                     # Process results if we found matches
@@ -273,22 +287,24 @@ class WalletGenerator:
                                 wallet = data
                                 public_key = wallet['public_key']
                                 
-                                # Add to wallets set and found_wallets list
-                                self.wallets.add(public_key)
+                                # Add to found wallets (minimal processing)
                                 with found_wallets_lock:
                                     found_wallets.append(wallet)
                                 
-                                # Print match
-                                print("\n\n🎉 Found matching wallet!")
-                                print(f"🔑 Public Key: {public_key}")
-                                print(f"🔒 Private Key: {wallet['private_key']}")
+                                # Print match (minimal formatting for speed)
+                                print(f"\n🎉 Found match: {public_key}")
                             
-                                # Save to GitHub if configured
+                                # Save to GitHub in a separate thread to not block generation
                                 if self.initial_github_check_done:
                                     try:
-                                        self.save_wallet(wallet)
+                                        # Save in background to avoid blocking
+                                        threading.Thread(
+                                            target=self.save_wallet,
+                                            args=(wallet,),
+                                            daemon=True
+                                        ).start()
                                     except Exception as e:
-                                        print(f"❌ Error saving wallet to GitHub: {str(e)}")
+                                        print(f"❌ Error queuing save: {str(e)}")
                     
                     if shutdown_flag:
                         print("\n👋 Shutting down...")
