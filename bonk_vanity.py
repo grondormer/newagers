@@ -2,12 +2,14 @@ import base58
 import json
 import os
 import time
+import threading
 import multiprocessing
 from multiprocessing import Pool, cpu_count
 from solders.keypair import Keypair
 from github import Github, Auth
 import signal
 from dotenv import load_dotenv
+from flask import Flask, Response
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,14 +20,20 @@ urllib3.disable_warnings()
 
 # Global flag for clean shutdown
 shutdown_flag = False
+app = Flask(__name__)
+
+# Store found wallets
+found_wallets = []
+found_wallets_lock = threading.Lock()
+
+# Global counter for wallet generation
+wallet_counter = 0
+counter_lock = threading.Lock()
 
 def signal_handler(sig, frame):
     global shutdown_flag
     shutdown_flag = True
     print("\n👋 Shutting down gracefully...")
-
-# Register signal handler for clean shutdown
-signal.signal(signal.SIGINT, signal_handler)
 
 # Configuration
 TARGET_SUFFIX = "bonk"
@@ -38,34 +46,28 @@ class WalletGenerator:
         self.github = None
         self.repo = None
         self.wallets = set()
-        self.existing_wallets = []  # Initialize the list to store existing wallets
+        self.existing_wallets = []
         self.last_save = 0
         self.save_interval = 60  # Save to GitHub every 60 seconds
         self.initial_github_check_done = False
-        self.counter = 0
         self.start_time = time.time()
         self.last_print = time.time()
         self.print_interval = 30.0  # Print status every 30 seconds
-        self.last_rate_check = time.time()
-        self.last_counter = 0
 
     def print_status(self, force=False):
         current_time = time.time()
         time_since_last_print = current_time - self.last_print
         
-        # Always calculate rate based on last 30 seconds window
-        if current_time - self.last_rate_check >= 30.0:
-            elapsed = current_time - self.last_rate_check
-            wallets_checked = self.counter - self.last_counter
-            rate = wallets_checked / elapsed if elapsed > 0 else 0
+        global wallet_counter
+        with counter_lock:
+            elapsed = current_time - self.start_time
+            rate = wallet_counter / elapsed if elapsed > 0 else 0
             
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-            print(f"[{timestamp}] 🔍 Total: {self.counter:,} wallets | "
-                  f"Rate: {rate:,.0f} w/s (last 30s) | "
+            print(f"[{timestamp}] 🔍 Total: {wallet_counter:,} wallets | "
+                  f"Rate: {rate:,.0f} w/s | "
                   f"Found: {len(self.wallets):,}", flush=True)
-                  
-            self.last_rate_check = current_time
-            self.last_counter = self.counter
+            
             self.last_print = current_time
 
     def setup_github(self, test_only=False):
@@ -197,11 +199,15 @@ class WalletGenerator:
                 else:
                     matches.append(('reject', wallet['public_key']))
         
-        self.counter += len(batch)
+        # Update the global counter in a thread-safe way
+        global wallet_counter
+        with counter_lock:
+            wallet_counter += len(batch)
+            
         return matches if matches else None
 
     def run(self):
-        """Main loop to generate vanity wallets (optimized version)."""
+        """Main wallet generation loop."""
         print(f"🚀 Starting to generate wallets ending with '{TARGET_SUFFIX}'...")
         print(f"Using {cpu_count()} CPU cores for parallel processing")
         
@@ -214,24 +220,25 @@ class WalletGenerator:
         
         try:
             with Pool(processes=cpu_count()) as pool:
-                # Use a larger chunksize for better performance
-                # Initialize batch counter
                 batch_count = 0
                 
                 for results in pool.imap_unordered(
                     self.process_wallet_batch, 
-                    range(10**6),  # Adjust based on your needs
-                    chunksize=10   # Process in chunks to reduce overhead
+                    range(10**6),
+                    chunksize=10
                 ):
                     if shutdown_flag:
                         break
                         
                     # Update counter with the batch size (100 wallets per batch)
                     batch_count += 1
-                    self.counter = batch_count * 100  # 100 wallets per batch
-                        
+                    global wallet_counter
+                    with counter_lock:
+                        wallet_counter = batch_count * 100
+                    
                     # Print status periodically
-                    self.print_status()
+                    if time.time() - self.last_print >= self.print_interval:
+                        self.print_status()
                     
                     # Process results if we found matches
                     if results:
@@ -240,37 +247,23 @@ class WalletGenerator:
                                 wallet = data
                                 public_key = wallet['public_key']
                                 
-                                # Add to wallets set
+                                # Add to wallets set and found_wallets list
                                 self.wallets.add(public_key)
+                                with found_wallets_lock:
+                                    found_wallets.append(wallet)
                                 
                                 # Print match
                                 print("\n\n🎉 Found matching wallet!")
                                 print(f"🔑 Public Key: {public_key}")
                                 print(f"🔒 Private Key: {wallet['private_key']}")
                             
-                                # Initialize GitHub connection if not already done
-                                if not self.initial_github_check_done:
-                                    if self.setup_github():
-                                        self.initial_github_check_done = True
-                                    else:
-                                        print("⚠️ Could not connect to GitHub. Wallet not saved!")
-                                        continue
-                                    
-                                # Save to GitHub
-                                try:
-                                    self.save_wallet(wallet)
-                                except Exception as e:
-                                    print(f"❌ Error saving wallet to GitHub: {str(e)}")
-                            
-                            elif status == 'reject':
-                                public_key = data
-                                # Optional: Uncomment to see rejected wallets
-                                # last_four = public_key[-4:]
-                                # colored = f"{public_key[:-4]}\033[92m{last_four}\033[0m"
-                                # print(f"\n❌ {colored} - Rejected (wrong case)")
-                                continue  # Removed the typo 'continuet'
+                                # Save to GitHub if configured
+                                if self.initial_github_check_done:
+                                    try:
+                                        self.save_wallet(wallet)
+                                    except Exception as e:
+                                        print(f"❌ Error saving wallet to GitHub: {str(e)}")
                     
-                    # Check for shutdown flag
                     if shutdown_flag:
                         print("\n👋 Shutting down...")
                         break
@@ -278,23 +271,74 @@ class WalletGenerator:
         except Exception as e:
             print(f"\n❌ Error: {str(e)}")
         finally:
-            # Final status update
             self.print_status(force=True)
-            print("\n✨ Done!")
-            
-            # Print summary
-            elapsed = time.time() - self.start_time
-            print(f"Total wallets checked: {self.counter:,}")
-            print(f"Total matches found: {len(self.wallets):,}")
-            if elapsed > 0:
-                rate = self.counter / elapsed
-                print(f"Average rate: {rate:,.2f} wallets/second")
-            print(f"Elapsed time: {elapsed:.1f} seconds")
+            print("\n✨ Wallet generation stopped!")
+    
+    def start(self):
+        """Start the wallet generation in a separate thread."""
+        if self.is_running:
+            return False
+        
+        self.is_running = True
+        self.worker_thread = threading.Thread(target=self._run_worker, daemon=True)
+        self.worker_thread.start()
+        return True
+    
+    def stop(self):
+        """Stop the wallet generation."""
+        global shutdown_flag
+        if self.is_running:
+            shutdown_flag = True
+            self.worker_thread.join()
+            shutdown_flag = False
+            return True
+        return False
+    
+    def get_status(self):
+        """Get current status of wallet generation."""
+        elapsed = time.time() - self.start_time
+        rate = wallet_counter.value / elapsed if elapsed > 0 else 0
+        
+        return {
+            'is_running': self.is_running,
+            'wallets_checked': wallet_counter.value,
+            'wallets_found': len(found_wallets),
+            'elapsed_time': elapsed,
+            'rate_per_second': rate
+        }
 
+# Initialize the wallet generator and start generation in a background thread
+generator = WalletGenerator()
+
+@app.route('/')
+def index():
+    """Serve a simple page showing found wallets."""
+    with found_wallets_lock:
+        # Create a simple text response with found wallets
+        response = "Found Wallets:\n\n"
+        for wallet in found_wallets:
+            response += f"🔑 {wallet['public_key']}\n"
+        
+        return Response(response, mimetype='text/plain')
+
+# Start wallet generation in a background thread
+def start_wallet_generation():
+    generator.run()
+
+# Start the wallet generation when the script runs
 if __name__ == "__main__":
     if not GITHUB_TOKEN:
         print("⚠️ Please set your GITHUB_TOKEN in the .env file!")
         exit(1)
-        
-    generator = WalletGenerator()
-    generator.run()
+    
+    # Start wallet generation in a background thread
+    wallet_thread = threading.Thread(target=start_wallet_generation, daemon=True)
+    wallet_thread.start()
+    
+    # Register signal handler for clean shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Start the Flask app
+    port = int(os.getenv('PORT', 5000))
+    print(f"[Web] Server running on http://localhost:{port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
