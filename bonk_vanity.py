@@ -528,22 +528,41 @@ def index():
 
 @app.route('/start-keepalive', methods=['POST'])
 def start_keepalive():
-    """API endpoint to start the keep-alive process."""
-    success = start_keep_alive()
+    """Start the keep-alive ping."""
+    global keep_alive_active, keep_alive_thread, keep_alive_stop
+    
+    if not keep_alive_active:
+        keep_alive_stop = threading.Event()
+        keep_alive_thread = threading.Thread(
+            target=keep_alive_worker,
+            daemon=True
+        )
+        keep_alive_thread.start()
+        keep_alive_active = True
+        print("✅ Keep-alive started")
+    
     return jsonify({
-        'success': success,
-        'running': keep_alive_active,
-        'message': 'Keep-alive started successfully' if success else 'Keep-alive is already running'
+        'success': True,
+        'active': keep_alive_active,
+        'message': 'Keep-alive started' if keep_alive_active else 'Keep-alive already running'
     })
 
 @app.route('/stop-keepalive', methods=['POST'])
 def stop_keepalive():
-    """API endpoint to stop the keep-alive process."""
-    success = stop_keep_alive()
+    """Stop the keep-alive ping."""
+    global keep_alive_active, keep_alive_stop, keep_alive_thread
+    
+    if keep_alive_active:
+        keep_alive_stop.set()
+        if keep_alive_thread:
+            keep_alive_thread.join(timeout=2.0)
+        keep_alive_active = False
+        print("🛑 Keep-alive stopped")
+    
     return jsonify({
-        'success': success,
-        'running': keep_alive_active,
-        'message': 'Keep-alive stopped successfully' if success else 'Keep-alive is not running'
+        'success': True,
+        'active': keep_alive_active,
+        'message': 'Keep-alive stopped' if not keep_alive_active else 'Failed to stop keep-alive'
     })
 
 # Start wallet generation in a background thread
@@ -574,45 +593,7 @@ if __name__ == "__main__":
     
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Keep-alive control endpoints
-    @app.route('/start-keepalive', methods=['POST'])
-    def start_keepalive():
-        """Start the keep-alive ping."""
-        global keep_alive_active, keep_alive_thread, keep_alive_stop
-        
-        if not keep_alive_active:
-            keep_alive_stop = threading.Event()
-            keep_alive_thread = threading.Thread(
-                target=keep_alive_worker,
-                daemon=True
-            )
-            keep_alive_thread.start()
-            keep_alive_active = True
-            print("✅ Keep-alive started")
-        
-        return jsonify({
-            'success': True,
-            'active': keep_alive_active,
-            'message': 'Keep-alive started' if keep_alive_active else 'Keep-alive already running'
-        })
-    
-    @app.route('/stop-keepalive', methods=['POST'])
-    def stop_keepalive():
-        """Stop the keep-alive ping."""
-        global keep_alive_active, keep_alive_stop, keep_alive_thread
-        
-        if keep_alive_active:
-            keep_alive_stop.set()
-            if keep_alive_thread:
-                keep_alive_thread.join(timeout=2.0)
-            keep_alive_active = False
-            print("🛑 Keep-alive stopped")
-        
-        return jsonify({
-            'success': True,
-            'active': keep_alive_active,
-            'message': 'Keep-alive stopped' if not keep_alive_active else 'Failed to stop keep-alive'
-        })
+    # Keep-alive control endpoints are defined above the main block
 
     # Start the Flask app
     port = int(os.getenv('PORT', 5000))
