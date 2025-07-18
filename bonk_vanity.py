@@ -416,6 +416,10 @@ def index():
         total_matched = len(found_wallets)
         
         # Generate HTML response
+        # Prepare the dynamic parts of the HTML
+        active_class = ' active' if keep_alive_active else ''
+        button_text = 'Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'
+        
         html = """<!DOCTYPE html>
         <html>
         <head>
@@ -472,9 +476,9 @@ def index():
                 <p>Last updated: {current_time}</p>
             </div>
             
-            <button id="keepAliveBtn" class="keep-alive-btn{' active' if keep_alive_active else ''}" 
+            <button id="keepAliveBtn" class="keep-alive-btn{active_class}" 
                     onclick="toggleKeepAlive()">
-                {'Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'}
+                {button_text}
             </button>
             
             <script>
@@ -502,7 +506,8 @@ def index():
             total_generated=total_generated,
             total_matched=total_matched,
             current_time=time.strftime('%Y-%m-%d %H:%M:%S'),
-            keep_alive_active=keep_alive_active
+            active_class=active_class,
+            button_text=button_text
         )
         
         return Response(html, mimetype='text/html')
