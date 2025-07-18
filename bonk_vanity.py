@@ -398,7 +398,7 @@ class WalletGenerator:
 generator = WalletGenerator()
 
 # Keep-alive control variables
-keep_alive_active = False
+keep_alive_active = True  # Start with keep-alive active by default
 keep_alive_thread = None
 keep_alive_stop = threading.Event()
 
@@ -443,6 +443,10 @@ def keep_alive_worker():
     keep_alive_active = False
     print("Keep-alive worker stopped")
 
+# Start keep-alive by default
+keep_alive_thread = threading.Thread(target=keep_alive_worker, daemon=True)
+keep_alive_thread.start()
+
 def start_keep_alive():
     """Start the keep-alive background thread."""
     global keep_alive_active, keep_alive_thread, keep_alive_stop
@@ -485,7 +489,8 @@ def index():
         # Generate HTML response
         # Prepare the dynamic parts of the HTML
         active_class = ' active' if keep_alive_active else ''
-        button_text = 'Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'
+        # Invert the button text since keep-alive starts active by default
+        button_text = 'Start Keep-Alive' if not keep_alive_active else 'Stop Keep-Alive'
         
         html = """<!DOCTYPE html>
         <html>
