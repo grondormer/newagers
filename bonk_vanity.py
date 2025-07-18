@@ -52,9 +52,11 @@ class WalletGenerator:
         if force or (current_time - self.last_print) >= self.print_interval:
             elapsed = current_time - self.start_time
             rate = self.counter / elapsed if elapsed > 0 else 0
-            print(f"\r🔍 Checking: {self.counter:,} wallets | "
+            # Add timestamp and newline for better logging in Render
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+            print(f"[{timestamp}] 🔍 Checking: {self.counter:,} wallets | "
                   f"Rate: {rate:,.0f} w/s | "
-                  f"Found: {len(self.wallets):,}", end='', flush=True)
+                  f"Found: {len(self.wallets):,}", flush=True)
             self.last_print = current_time
 
     def setup_github(self):
