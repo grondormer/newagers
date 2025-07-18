@@ -632,15 +632,18 @@ def stop_keepalive():
 
 # Start wallet generation in a background thread
 def start_wallet_generation():
-    generator.run()
+    return generator.start()
 
 # Schedule auto-start after 1 minute
 def schedule_auto_start():
     print("⏳ Auto-start scheduled in 1 minute...")
     time.sleep(60)  # Wait for 1 minute
-    if not generator.running:  # Only start if not already running
+    if not generator.is_running:  # Only start if not already running
         print("🔄 Auto-starting wallet generation...")
-        start_wallet_generation()
+        if start_wallet_generation():
+            print("✅ Wallet generation started successfully")
+        else:
+            print("⚠️ Wallet generation is already running")
 
 auto_start_thread = None
 
