@@ -416,15 +416,15 @@ def index():
         total_matched = len(found_wallets)
         
         # Generate HTML response
-        html = f"""<!DOCTYPE html>
+        html = """<!DOCTYPE html>
         <html>
         <head>
             <title>Bonk Vanity Wallet Generator</title>
             <style>
-                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
-                .stats {{ background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
-                .control-panel {{ background: #e9f7fe; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
-                button {{ 
+                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                .stats { background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                .control-panel { background: #e9f7fe; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                button { 
                     background: #4CAF50; 
                     color: white; 
                     border: none; 
@@ -436,11 +436,30 @@ def index():
                     margin: 4px 2px; 
                     cursor: pointer; 
                     border-radius: 4px;
-                }}
-                button:disabled {{ background: #cccccc; cursor: not-allowed; }}
-                #status {{ font-weight: bold; }}
-                .active {{ color: #4CAF50; }}
-                .inactive {{ color: #f44336; }}
+                }
+                button:disabled { background: #cccccc; cursor: not-allowed; }
+                #status { font-weight: bold; }
+                .active { color: #4CAF50; }
+                .inactive { color: #f44336; }
+                .keep-alive-btn {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    z-index: 1000;
+                    background: #4CAF50;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 5px;
+                    cursor: pointer;
+                }
+                .keep-alive-btn:disabled {
+                    background: #cccccc;
+                    cursor: not-allowed;
+                }
+                .keep-alive-btn.active {
+                    background: #f44336;
+                }
             </style>
         </head>
         <body>
@@ -450,62 +469,40 @@ def index():
                 <h2>Wallet Generation Stats</h2>
                 <p>Total Wallets Generated: {total_generated:,}</p>
                 <p>Matching Wallets Found: {total_matched:,}</p>
-                <p>Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p>Last updated: {current_time}</p>
             </div>
             
-            <div class="control-panel">
-                <h2>Keep-Alive Control</h2>
-                <p>Status: <span id="status" class="{status_class}">{status_text}</span></p>
-                <button id="toggleButton" onclick="toggleKeepAlive()">{button_text}</button>
-                <p><small>This will ping the site every minute to keep it active.</small></p>
-            </div>
+            <button id="keepAliveBtn" class="keep-alive-btn{' active' if keep_alive_active else ''}" 
+                    onclick="toggleKeepAlive()">
+                {'Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'}
+            </button>
             
             <script>
                 function toggleKeepAlive() {{
-                    const button = document.getElementById('toggleButton');
-                    const status = document.getElementById('status');
+                    const btn = document.getElementById('keepAliveBtn');
+                    btn.disabled = true;
                     
-                    button.disabled = true;
-                    
-                    fetch(button.textContent.trim() === 'Start Keep-Alive' ? '/start-keepalive' : '/stop-keepalive')
+                    fetch(btn.textContent.trim() === 'Start Keep-Alive' ? '/start-keepalive' : '/stop-keepalive')
                         .then(response => response.json())
                         .then(data => {{
                             if (data.success) {{
-                                if (data.running) {{
-                                    button.textContent = 'Stop Keep-Alive';
-                                    status.textContent = 'Active';
-                                    status.className = 'active';
+                                btn.textContent = data.active ? 'Stop Keep-Alive' : 'Start Keep-Alive';
+                                if (data.active) {{
+                                    btn.classList.add('active');
                                 }} else {{
-                                    button.textContent = 'Start Keep-Alive';
-                                    status.textContent = 'Inactive';
-                                    status.className = 'inactive';
+                                    btn.classList.remove('active');
                                 }}
-                            }} else {{
-                                alert('Error: ' + data.message);
                             }}
-                            button.disabled = false;
-                        }})
-                        .catch(error => {{
-                            console.error('Error:', error);
-                            alert('An error occurred. Please check the console for details.');
-                            button.disabled = false;
+                            btn.disabled = false;
                         }});
                 }}
-                
-                // Update the button state on page load
-                document.addEventListener('DOMContentLoaded', function() {{
-                    const button = document.getElementById('toggleButton');
-                    button.disabled = false;
-                }});
             </script>
         </body>
-        </html>
-        """.format(
+        </html>""".format(
             total_generated=total_generated,
             total_matched=total_matched,
-            status_text='Active' if keep_alive_active else 'Inactive',
-            status_class='active' if keep_alive_active else 'inactive',
-            button_text='Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'
+            current_time=time.strftime('%Y-%m-%d %H:%M:%S'),
+            keep_alive_active=keep_alive_active
         )
         
         return Response(html, mimetype='text/html')
@@ -558,106 +555,7 @@ if __name__ == "__main__":
     
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Add keep-alive control button to the existing page
-    @app.route('/')
-    def index():
-        with found_wallets_lock:
-            # Get the current stats
-            global wallet_counter, keep_alive_active
-            with counter_lock:
-                total_generated = wallet_counter
-            total_matched = len(found_wallets)
-            
-            # Get the original HTML response
-            original_html = """<!DOCTYPE html>
-            <html>
-            <head>
-                <title>Bonk Vanity Wallet Generator</title>
-                <style>
-                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-                    .stats { background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-                    .control-panel { background: #e9f7fe; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-                    button { 
-                        background: #4CAF50; 
-                        color: white; 
-                        border: none; 
-                        padding: 10px 20px; 
-                        text-align: center; 
-                        text-decoration: none; 
-                        display: inline-block; 
-                        font-size: 16px; 
-                        margin: 4px 2px; 
-                        cursor: pointer; 
-                        border-radius: 4px;
-                    }
-                    button:disabled { background: #cccccc; cursor: not-allowed; }
-                    #status { font-weight: bold; }
-                    .active { color: #4CAF50; }
-                    .inactive { color: #f44336; }
-                    .keep-alive-btn {
-                        position: fixed;
-                        bottom: 20px;
-                        right: 20px;
-                        z-index: 1000;
-                        background: #4CAF50;
-                        color: white;
-                        border: none;
-                        padding: 10px 20px;
-                        border-radius: 5px;
-                        cursor: pointer;
-                    }
-                    .keep-alive-btn:disabled {
-                        background: #cccccc;
-                        cursor: not-allowed;
-                    }
-                    .keep-alive-btn.active {
-                        background: #f44336;
-                    }
-                </style>
-            </head>
-            <body>
-                <h1>Bonk Vanity Wallet Generator</h1>
-                
-                <div class="stats">
-                    <h2>Wallet Generation Stats</h2>
-                    <p>Total Wallets Generated: {total_generated:,}</p>
-                    <p>Matching Wallets Found: {total_matched:,}</p>
-                    <p>Last updated: {current_time}</p>
-                </div>
-                
-                <button id="keepAliveBtn" class="keep-alive-btn{' active' if keep_alive_active else ''}" 
-                        onclick="toggleKeepAlive()">
-                    {'Stop Keep-Alive' if keep_alive_active else 'Start Keep-Alive'}
-                </button>
-                
-                <script>
-                    function toggleKeepAlive() {{
-                        const btn = document.getElementById('keepAliveBtn');
-                        btn.disabled = true;
-                        
-                        fetch(btn.textContent.trim() === 'Start Keep-Alive' ? '/start-keepalive' : '/stop-keepalive')
-                            .then(response => response.json())
-                            .then(data => {{
-                                if (data.success) {{
-                                    btn.textContent = data.active ? 'Stop Keep-Alive' : 'Start Keep-Alive';
-                                    if (data.active) {{
-                                        btn.classList.add('active');
-                                    }} else {{
-                                        btn.classList.remove('active');
-                                    }}
-                                }}
-                                btn.disabled = false;
-                            }});
-                    }}
-                </script>
-            </body>
-            </html>""".format(
-                total_generated=total_generated,
-                total_matched=total_matched,
-                current_time=time.strftime('%Y-%m-%d %H:%M:%S')
-            )
-            
-            return Response(original_html, mimetype='text/html')
+    # Keep-alive control button has been integrated into the main index route
 
     # Start the Flask app
     port = int(os.getenv('PORT', 5000))
