@@ -354,20 +354,22 @@ class WalletGenerator:
 
     def start(self):
         """Start the wallet generation in a separate thread."""
-        if self.is_running:
+        if self.running:
             return False
         
-        self.is_running = True
-        self.worker_thread = threading.Thread(target=self._run_worker, daemon=True)
+        self.running = True
+        self.worker_thread = threading.Thread(target=self.run, daemon=True)
         self.worker_thread.start()
         return True
     
     def stop(self):
         """Stop the wallet generation."""
         global shutdown_flag
-        if self.is_running:
+        if self.running:
             shutdown_flag = True
-            self.worker_thread.join()
+            if hasattr(self, 'worker_thread') and self.worker_thread is not None:
+                self.worker_thread.join()
+            self.running = False
             shutdown_flag = False
             return True
         return False
@@ -385,7 +387,7 @@ class WalletGenerator:
             rate = 0
             
         return {
-            'is_running': self.is_running,
+            'is_running': self.running,
             'wallets_checked': count,
             'wallets_found': len(found_wallets),
             'elapsed_time': elapsed,
@@ -638,7 +640,7 @@ def start_wallet_generation():
 def schedule_auto_start():
     print("⏳ Auto-start scheduled in 1 minute...")
     time.sleep(60)  # Wait for 1 minute
-    if not generator.is_running:  # Only start if not already running
+    if not generator.running:  # Only start if not already running
         print("🔄 Auto-starting wallet generation...")
         if start_wallet_generation():
             print("✅ Wallet generation started successfully")
