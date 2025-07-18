@@ -484,21 +484,35 @@ def index():
             <script>
                 function toggleKeepAlive() {{
                     const btn = document.getElementById('keepAliveBtn');
+                    const isStarting = btn.textContent.trim() === 'Start Keep-Alive';
                     btn.disabled = true;
                     
-                    fetch(btn.textContent.trim() === 'Start Keep-Alive' ? '/start-keepalive' : '/stop-keepalive')
-                        .then(response => response.json())
-                        .then(data => {{
-                            if (data.success) {{
-                                btn.textContent = data.active ? 'Stop Keep-Alive' : 'Start Keep-Alive';
-                                if (data.active) {{
-                                    btn.classList.add('active');
-                                }} else {{
-                                    btn.classList.remove('active');
-                                }}
+                    fetch(isStarting ? '/start-keepalive' : '/stop-keepalive', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                        }}
+                    }})
+                    .then(response => response.json())
+                    .then(data => {{
+                        if (data.success) {{
+                            btn.textContent = data.active ? 'Stop Keep-Alive' : 'Start Keep-Alive';
+                            if (data.active) {{
+                                btn.classList.add('active');
+                            }} else {{
+                                btn.classList.remove('active');
                             }}
-                            btn.disabled = false;
-                        }});
+                            console.log(data.message);
+                        }} else {{
+                            console.error('Error:', data.message);
+                        }}
+                    }})
+                    .catch(error => {{
+                        console.error('Error:', error);
+                    }})
+                    .finally(() => {{
+                        btn.disabled = false;
+                    }});
                 }}
             </script>
         </body>
@@ -560,7 +574,45 @@ if __name__ == "__main__":
     
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Keep-alive control button has been integrated into the main index route
+    # Keep-alive control endpoints
+    @app.route('/start-keepalive', methods=['POST'])
+    def start_keepalive():
+        """Start the keep-alive ping."""
+        global keep_alive_active, keep_alive_thread, keep_alive_stop
+        
+        if not keep_alive_active:
+            keep_alive_stop = threading.Event()
+            keep_alive_thread = threading.Thread(
+                target=keep_alive_worker,
+                daemon=True
+            )
+            keep_alive_thread.start()
+            keep_alive_active = True
+            print("✅ Keep-alive started")
+        
+        return jsonify({
+            'success': True,
+            'active': keep_alive_active,
+            'message': 'Keep-alive started' if keep_alive_active else 'Keep-alive already running'
+        })
+    
+    @app.route('/stop-keepalive', methods=['POST'])
+    def stop_keepalive():
+        """Stop the keep-alive ping."""
+        global keep_alive_active, keep_alive_stop, keep_alive_thread
+        
+        if keep_alive_active:
+            keep_alive_stop.set()
+            if keep_alive_thread:
+                keep_alive_thread.join(timeout=2.0)
+            keep_alive_active = False
+            print("🛑 Keep-alive stopped")
+        
+        return jsonify({
+            'success': True,
+            'active': keep_alive_active,
+            'message': 'Keep-alive stopped' if not keep_alive_active else 'Failed to stop keep-alive'
+        })
 
     # Start the Flask app
     port = int(os.getenv('PORT', 5000))
