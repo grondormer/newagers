@@ -24,7 +24,7 @@ signal.signal(signal.SIGINT, signal_handler)
 
 # Configuration
 TARGET_SUFFIX = "bonk"
-GITHUB_TOKEN = "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"  # GitHub token for repository access
+GITHUB_TOKEN = "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"  # GitHub token for repository access
 REPO_NAME = "grondormer/vanbonkwal"  # Your repository
 FILE_NAME = "wallets.json"  # File to store wallets in the repo
 
