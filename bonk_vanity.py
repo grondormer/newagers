@@ -631,10 +631,24 @@ def stop_keepalive():
 def start_wallet_generation():
     generator.run()
 
+# Schedule auto-start after 1 minute
+def schedule_auto_start():
+    print("⏳ Auto-start scheduled in 1 minute...")
+    time.sleep(60)  # Wait for 1 minute
+    if not generator.running:  # Only start if not already running
+        print("🔄 Auto-starting wallet generation...")
+        start_wallet_generation()
+
+auto_start_thread = None
+
 # Start the wallet generation when the script runs
 if __name__ == "__main__":
     # Initialize multiprocessing manager and shared variables
     manager = Manager()
+    
+    # Start the auto-start timer in a separate thread
+    auto_start_thread = threading.Thread(target=schedule_auto_start, daemon=True)
+    auto_start_thread.start()
     wallet_counter = manager.Value('i', 0)
     counter_lock = manager.Lock()
     
