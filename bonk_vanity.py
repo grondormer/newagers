@@ -421,10 +421,10 @@ def index():
         <head>
             <title>Bonk Vanity Wallet Generator</title>
             <style>
-                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-                .stats { background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-                .control-panel { background: #e9f7fe; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-                button { 
+                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
+                .stats {{ background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                .control-panel {{ background: #e9f7fe; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                button {{ 
                     background: #4CAF50; 
                     color: white; 
                     border: none; 
@@ -436,12 +436,12 @@ def index():
                     margin: 4px 2px; 
                     cursor: pointer; 
                     border-radius: 4px;
-                }
-                button:disabled { background: #cccccc; cursor: not-allowed; }
-                #status { font-weight: bold; }
-                .active { color: #4CAF50; }
-                .inactive { color: #f44336; }
-                .keep-alive-btn {
+                }}
+                button:disabled {{ background: #cccccc; cursor: not-allowed; }}
+                #status {{ font-weight: bold; }}
+                .active {{ color: #4CAF50; }}
+                .inactive {{ color: #f44336; }}
+                .keep-alive-btn {{
                     position: fixed;
                     bottom: 20px;
                     right: 20px;
@@ -452,14 +452,14 @@ def index():
                     padding: 10px 20px;
                     border-radius: 5px;
                     cursor: pointer;
-                }
-                .keep-alive-btn:disabled {
+                }}
+                .keep-alive-btn:disabled {{
                     background: #cccccc;
                     cursor: not-allowed;
-                }
-                .keep-alive-btn.active {
+                }}
+                .keep-alive-btn.active {{
                     background: #f44336;
-                }
+                }}
             </style>
         </head>
         <body>
