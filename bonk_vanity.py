@@ -61,6 +61,7 @@ class WalletGenerator:
         self.last_print = self.start_time
         self.last_count = 0
         self.print_interval = 2.0  # Print status every 2 seconds for more frequent updates
+        self.running = False  # Track if the generator is currently running
 
     def print_status(self, force=False):
         current_time = time.time()
@@ -258,6 +259,7 @@ class WalletGenerator:
 
     def run(self):
         """Main wallet generation loop (optimized for performance)."""
+        self.running = True
         print(f"🚀 Starting to generate wallets ending with '{TARGET_SUFFIX}'...")
         
         # Reset counter when starting if counter_lock is available
@@ -294,6 +296,7 @@ class WalletGenerator:
                     chunksize=10   # Process 10 batches per worker at a time
                 ):
                     if shutdown_flag:
+                        self.running = False
                         break
                     
                     # Print status more frequently
