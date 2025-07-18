@@ -139,34 +139,54 @@ class WalletGenerator:
             print("GitHub repository not available. Wallet not saved to GitHub.")
             return
 
-        # Add the new wallet to our list
-        self.existing_wallets.append(wallet_data)
-        
-        # Prepare wallet data for GitHub (only public and private keys)
-        wallet_data_clean = [
-            {'public_key': w['public_key'], 'private_key': w['private_key']}
-            for w in self.existing_wallets
-        ]
-        
         try:
-            # Try to get the existing file
             try:
+                # Try to get the existing file
                 contents = self.repo.get_contents(FILE_NAME)
-                # File exists, update it
-                self.repo.update_file(
-                    FILE_NAME,
-                    f"Add wallet {wallet_data['public_key'][-10:]}",
-                    json.dumps(wallet_data_clean, indent=2),
-                    contents.sha
+                # Get existing wallets
+                existing_wallets = json.loads(contents.decoded_content.decode())
+                if not isinstance(existing_wallets, list):
+                    existing_wallets = []
+                
+                # Check if wallet already exists to avoid duplicates
+                wallet_exists = any(
+                    w['public_key'] == wallet_data['public_key'] 
+                    for w in existing_wallets
                 )
-            except:
-                # File doesn't exist, create it
-                self.repo.create_file(
-                    FILE_NAME,
-                    "Initial commit: Add first wallet",
-                    json.dumps(wallet_data_clean, indent=2)
-                )
-            print(f"✅ Saved wallet to GitHub: {wallet_data['public_key']}")
+                
+                if not wallet_exists:
+                    # Add the new wallet
+                    existing_wallets.append({
+                        'public_key': wallet_data['public_key'],
+                        'private_key': wallet_data['private_key']
+                    })
+                    
+                    # Update the file with all wallets
+                    self.repo.update_file(
+                        FILE_NAME,
+                        f"Add wallet: {wallet_data['public_key']}",
+                        json.dumps(existing_wallets, indent=2),
+                        contents.sha
+                    )
+                    print(f"✅ Saved wallet to GitHub: {wallet_data['public_key']}")
+                else:
+                    print(f"ℹ️ Wallet already exists in GitHub: {wallet_data['public_key']}")
+                    
+            except Exception as e:
+                # File doesn't exist or other error, create new file with this wallet
+                if 'Not Found' in str(e):
+                    self.repo.create_file(
+                        FILE_NAME,
+                        "Initial commit: Add first wallet",
+                        json.dumps([{
+                            'public_key': wallet_data['public_key'],
+                            'private_key': wallet_data['private_key']
+                        }], indent=2)
+                    )
+                    print(f"✅ Created new file and saved wallet to GitHub: {wallet_data['public_key']}")
+                else:
+                    raise
+                    
         except Exception as e:
             print(f"❌ Error saving to GitHub: {str(e)}")
             print("Make sure your GitHub token has write access to the repository.")
